@@ -6,8 +6,9 @@ from email.header import Header
 import os
 import datetime
 import urllib3
+import re
 
-# 禁用安全警告（学校网站证书经常过期）
+# 忽略 SSL 证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- 配置区域 ---
@@ -19,26 +20,34 @@ RECEIVER_EMAIL = os.getenv("MAIL_USER")
 
 HISTORY_FILE = "history.txt"
 
-# --- 定义目标 ---
 SCHOOLS = [
     {
         "name": "力工学院-通知公告",
-        # 力工学院的网址你之前已经跑通了，保持不变
-        "candidates": [
-            "https://smes.shu.edu.cn/index/tzgg.htm",
-            "https://smes.shu.edu.cn/tzgg.htm"
-        ],
+        # 力工学院已经通了，保持原样
+        "urls": ["https://smes.shu.edu.cn/index/tzgg.htm"],
         "selectors": ["div[class*='list'] li a", ".winstyle67696 a", "ul li a"]
     },
     {
-        "name": "上大研究生院-通知公告",
-        # ✅ 这里修复了！利用你提供的线索 1027
-        "candidates": [
-            "https://gs.shu.edu.cn/index/1027.htm",  # 可能性1：数字ID索引 (最可能)
-            "https://gs.shu.edu.cn/tzgg.htm"         # 可能性2：备用
+        "name": "上大研究生院-综合通知(1027)",
+        "urls": [
+            # 🔥 方案A: 动态直连 (最稳，直接用ID 1027)
+            "https://gs.shu.edu.cn/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1027",
+            # 🔥 方案B: 扫荡首页 (防止列表页挂了，首页通常有最新几条)
+            "https://gs.shu.edu.cn/index.htm"
         ],
-        # 选择器保持宽泛，只要是列表里的链接都抓
-        "selectors": ["div[class*='list'] li a", ".winstyle196036 a", "ul li a", "table.winstyle126615 a"]
+        # 只要链接里包含 info/1027 我们就认为是这个栏目的新闻
+        "keyword": "info/1027", 
+        "selectors": ["a"] # 抓取所有链接，然后用 keyword 过滤
+    },
+    {
+        "name": "上大研究生院-培养管理(1029)",
+        "urls": [
+            # 同理，直接用ID 1029
+            "https://gs.shu.edu.cn/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1029",
+            "https://gs.shu.edu.cn/index.htm"
+        ],
+        "keyword": "info/1029",
+        "selectors": ["a"]
     }
 ]
 
@@ -63,9 +72,8 @@ def send_email(title, link, source_name):
         print(f"❌ 邮件发送失败: {e}")
 
 def run_task():
-    print(f"[{datetime.datetime.now()}] 开始抓取...")
+    print(f"[{datetime.datetime.now()}] 开始ID直连抓取...")
     
-    # 伪装成浏览器
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
@@ -81,85 +89,74 @@ def run_task():
     has_new = False
 
     for school in SCHOOLS:
-        print(f"\n正在尝试连接: {school['name']}")
-        valid_soup = None
-        used_url = ""
-
-        # === 1. 寻找正确的网址 ===
-        for url in school['candidates']:
+        print(f"\n正在连接: {school['name']}")
+        
+        # 遍历该栏目的所有可能的入口URL
+        for url in school['urls']:
             try:
                 print(f"  Trying: {url} ...", end="")
-                # verify=False 忽略证书错误
                 resp = requests.get(url, headers=headers, timeout=15, verify=False)
                 resp.encoding = 'utf-8'
                 
-                if resp.status_code == 200:
-                    # 简单检查一下页面有没有内容，防止假死
-                    if len(resp.text) > 500:
-                        print(" ✅ 通了！")
-                        valid_soup = BeautifulSoup(resp.text, 'html.parser')
-                        used_url = url
-                        break
-                    else:
-                        print(" ⚠️ 内容过短(可能被屏蔽)")
-                else:
+                if resp.status_code != 200:
                     print(f" ❌ {resp.status_code}")
-            except Exception as e:
-                print(f" ❌ 出错")
-        
-        if not valid_soup:
-            print(f"⚠️ {school['name']} 无法访问，跳过。")
-            continue
-
-        # === 2. 抓取内容 ===
-        links = []
-        for selector in school['selectors']:
-            found = valid_soup.select(selector)
-            if found:
-                links = found
-                break
-        
-        found_count = 0
-        for link in links:
-            href = link.get('href')
-            title = link.get_text(strip=True)
-            
-            # 过滤无效标题
-            if not href or len(title) < 4 or "更多" in title: continue
-            
-            # 拼接链接
-            if not href.startswith("http"):
-                if href.startswith("/"):
-                    # 绝对路径 /info/...
-                    domain = "/".join(used_url.split("/")[:3])
-                    full_url = domain + href
-                else:
-                    # 相对路径 info/... 或 ../info/...
-                    # 简单处理：如果是 info/ 开头，直接拼域名
-                    if href.startswith("info/"):
-                         domain = "/".join(used_url.split("/")[:3])
-                         full_url = f"{domain}/{href}"
-                    else:
-                         full_url = used_url.rsplit("/", 1)[0] + "/" + href
-            else:
-                full_url = href
-
-            found_count += 1
-            
-            # === 核心逻辑 ===
-            if full_url not in history:
-                new_history.add(full_url)
-                has_new = True
+                    continue
                 
-                # ✅ 这里的逻辑是：
-                # 如果历史记录不是空的（说明不是第一次跑），就发邮件
-                # 如果你想立刻测试研究生院的邮件，可以暂时把 "and len(history) > 0" 删掉
-                if len(history) > 0:
-                    send_email(title, full_url, school['name'])
+                print(" ✅ 通了")
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                
+                # 提取链接
+                # 如果指定了 keyword (针对研究生院)，就暴力扫描所有链接并过滤
+                found_links = []
+                if "keyword" in school:
+                    all_tags = soup.find_all('a')
+                    for tag in all_tags:
+                        href = tag.get('href')
+                        if href and school['keyword'] in href:
+                            found_links.append(tag)
                 else:
-                    print(f"  [初始化收录] {title}")
+                    # 针对力工学院，用选择器
+                    for sel in school['selectors']:
+                        found_links = soup.select(sel)
+                        if found_links: break
 
-        print(f"  > 解析出 {found_count} 条通知")
+                print(f"    > 找到 {len(found_links)} 个相关链接")
+
+                # 处理链接
+                for link in found_links:
+                    href = link.get('href')
+                    title = link.get_text(strip=True)
+                    
+                    if not href or len(title) < 4: continue
+                    
+                    # 拼接完整URL
+                    if not href.startswith("http"):
+                        if href.startswith("/"):
+                            domain = "/".join(url.split("/")[:3]) # 提取 https://gs.shu.edu.cn
+                            full_url = domain + href
+                        else:
+                            # 即使是相对路径，只要是 info/ 开头，通常也是根目录下的
+                            if href.startswith("info/"):
+                                domain = "/".join(url.split("/")[:3])
+                                full_url = f"{domain}/{href}"
+                            else:
+                                full_url = url.rsplit("/", 1)[0] + "/" + href
+                    else:
+                        full_url = href
+
+                    # 去重并记录
+                    if full_url not in history:
+                        new_history.add(full_url)
+                        has_new = True
+                        
+                        # 发送逻辑
+                        if len(history) > 0:
+                            send_email(title, full_url, school['name'])
+                        else:
+                            print(f"    [初始化] {title}")
+
+            except Exception as e:
+                print(f" ❌ 出错: {e}")
 
     # 保存
     if has_new:
