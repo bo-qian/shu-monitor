@@ -8,6 +8,7 @@ import datetime
 import urllib3
 import time  # 引入时间库，用于控制发送速度
 import posixpath
+import re
 from urllib.parse import urljoin, urldefrag, urlsplit, urlunsplit
 
 # 忽略证书错误警告
@@ -26,19 +27,54 @@ SCHOOLS = [
     {
         "name": "力工学院-通知公告",
         "urls": ["https://smes.shu.edu.cn/index/tzgg.htm"],
-        "selectors": ["div[class*='list'] li a", ".winstyle67696 a", "ul li a"]
+        "keywords": ["info/1015/"],
+        "selectors": ["a"]
     },
     {
-        "name": "上大研究生院-综合通知",
-        "urls": [
-            "https://gs.shu.edu.cn/index.htm",
-            "https://gs.shu.edu.cn/xwzx.htm"
-        ],
-        # 只要链接包含这些ID，就视为目标通知
-        "keywords": ["info/1027", "info/1029"],
+        "name": "力工学院-学生信息",
+        "urls": ["https://smes.shu.edu.cn/index/xsxx.htm"],
+        "keywords": ["info/1016/", "mp.weixin.qq.com", "r.xiumi.us"],
+        "selectors": ["a"]
+    },
+    {
+        "name": "力工学院-学术报告",
+        "urls": ["https://smes.shu.edu.cn/index/xsbg.htm"],
+        "keywords": ["info/1014/"],
+        "selectors": ["a"]
+    },
+    {
+        "name": "上大研究生院-综合",
+        "urls": ["https://gs.shu.edu.cn/xwlb/zh.htm"],
+        "keywords": ["info/1027/"],
+        "selectors": ["a"]
+    },
+    {
+        "name": "上大研究生院-培养",
+        "urls": ["https://gs.shu.edu.cn/xwlb/py.htm"],
+        "keywords": ["info/1029/"],
+        "selectors": ["a"]
+    },
+    {
+        "name": "上大研究生院-学位",
+        "urls": ["https://gs.shu.edu.cn/xwlb/xw.htm"],
+        "keywords": ["info/1031/"],
+        "selectors": ["a"]
+    },
+    {
+        "name": "上大研究生院-国际交流",
+        "urls": ["https://gs.shu.edu.cn/xwlb/gjjl.htm"],
+        "keywords": ["info/1030/"],
+        "selectors": ["a"]
+    },
+    {
+        "name": "上大研究生院-招生",
+        "urls": ["https://gs.shu.edu.cn/xwlb/zs.htm"],
+        "keywords": ["info/1028/", "yjszs.shu.edu.cn/info/"],
         "selectors": ["a"] 
     }
 ]
+
+SKIP_TITLES = {"公告", "综合", "招生", "培养", "国际交流", "学位", "信息", "博士后", "所有"}
 
 def normalize_url(url):
     """Canonicalize notice URLs so the same page is not sent twice."""
@@ -61,8 +97,14 @@ def normalize_url(url):
         ""
     ))
 
+def clean_title(link):
+    title = link.get('title') or link.get_text(" ", strip=True)
+    title = re.sub(r'\s*\d{4}[-/]\d{2}[-/]\d{2}.*$', '', title).strip()
+    return title
+
 def send_email(title, link, source_name):
     if not MAIL_USER or not MAIL_PASS:
+        print(f"⚠️ 邮箱配置不完整，跳过发送: {title}")
         return
     try:
         subject = f"【新通知】{source_name}: {title}"
@@ -88,8 +130,20 @@ def send_email(title, link, source_name):
     except Exception as e:
         print(f"❌ 发送失败: {e}")
 
+def run_test_email():
+    print("手动测试模式：只发送一封测试邮件，不抓取通知，也不修改 history.txt。")
+    send_email(
+        "School Monitor 测试邮件",
+        "https://github.com/bo-qian/shu-monitor/actions",
+        "School Monitor"
+    )
+
 def run_task():
     print(f"[{datetime.datetime.now()}] 开始抓取...")
+
+    if os.getenv("SEND_TEST_EMAIL", "").lower() == "true":
+        run_test_email()
+        return
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -150,9 +204,9 @@ def run_task():
         # 这里保持网页默认顺序
         for link in found_links:
             href = link.get('href')
-            title = link.get_text(strip=True)
+            title = clean_title(link)
             
-            if not href or len(title) < 4: continue
+            if not href or len(title) < 4 or title in SKIP_TITLES: continue
             
             # 链接补全并规范化，避免 ../ 和重复链接造成重复通知。
             full_url = normalize_url(urljoin(used_url, href))
