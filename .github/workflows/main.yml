@@ -3,31 +3,34 @@ name: School Monitor
 on:
   schedule:
     # 每天北京时间 8点-22点，每小时运行一次
-    - cron: '0 0-14 * * *'
+    - cron: '17 0-14 * * *'
   workflow_dispatch: # 允许你点按钮手动测试
 
 permissions:
   contents: write # 允许脚本修改 history.txt
+
+concurrency:
+  group: school-monitor
+  cancel-in-progress: false
 
 jobs:
   check-updates:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         
       - name: Python Setup
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           
       - name: Install Libs
-        run: pip install requests beautifulsoup4
+        run: python -m pip install requests beautifulsoup4
         
       - name: Run Script
         env:
-          # 把密码传给脚本
-          MAIL_USER: ${{ secrets.MAIL_USER }}
+          # 把邮箱授权码传给脚本
           MAIL_PASS: ${{ secrets.MAIL_PASS }}
         run: python main.py
         

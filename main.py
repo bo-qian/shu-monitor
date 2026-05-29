@@ -7,6 +7,8 @@ import os
 import datetime
 import urllib3
 import time  # 引入时间库，用于控制发送速度
+import posixpath
+from urllib.parse import urljoin, urldefrag, urlsplit, urlunsplit
 
 # 忽略证书错误警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -14,9 +16,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # --- 配置区域 ---
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
-MAIL_USER = os.getenv("MAIL_USER")
+MAIL_USER = "bo.qian@foxmail.com"
 MAIL_PASS = os.getenv("MAIL_PASS")
-RECEIVER_EMAIL = os.getenv("MAIL_USER")
+RECEIVER_EMAIL = MAIL_USER
 
 HISTORY_FILE = "history.txt"
 
@@ -37,6 +39,27 @@ SCHOOLS = [
         "selectors": ["a"] 
     }
 ]
+
+def normalize_url(url):
+    """Canonicalize notice URLs so the same page is not sent twice."""
+    clean_url = urldefrag(url.strip())[0]
+    parts = urlsplit(clean_url)
+    if not parts.scheme or not parts.netloc:
+        return clean_url
+
+    path = posixpath.normpath(parts.path)
+    if parts.path.endswith("/") and not path.endswith("/"):
+        path += "/"
+    if not path.startswith("/"):
+        path = "/" + path
+
+    return urlunsplit((
+        parts.scheme.lower(),
+        parts.netloc.lower(),
+        path,
+        parts.query,
+        ""
+    ))
 
 def send_email(title, link, source_name):
     if not MAIL_USER or not MAIL_PASS:
@@ -77,7 +100,9 @@ def run_task():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             for line in f:
-                history.add(line.strip())
+                url = normalize_url(line)
+                if url:
+                    history.add(url)
     
     new_history = history.copy()
     has_new = False
@@ -129,24 +154,12 @@ def run_task():
             
             if not href or len(title) < 4: continue
             
-            # 链接补全
-            if not href.startswith("http"):
-                if href.startswith("/"):
-                    domain = "/".join(used_url.split("/")[:3])
-                    full_url = domain + href
-                else:
-                    if href.startswith("info/"):
-                         domain = "/".join(used_url.split("/")[:3])
-                         full_url = f"{domain}/{href}"
-                    else:
-                         full_url = used_url.rsplit("/", 1)[0] + "/" + href
-            else:
-                full_url = href
+            # 链接补全并规范化，避免 ../ 和重复链接造成重复通知。
+            full_url = normalize_url(urljoin(used_url, href))
 
             # === 核心逻辑修改 ===
-            # 只要不在 history 里，就发邮件！
-            # 不再判断 "len(history) > 0"
-            if full_url not in history:
+            # 用 new_history 判断，避免同一次运行里重复链接发多封邮件。
+            if full_url not in new_history:
                 send_email(title, full_url, school['name'])
                 
                 new_history.add(full_url)
