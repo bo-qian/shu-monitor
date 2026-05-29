@@ -102,13 +102,32 @@ def clean_title(link):
     title = re.sub(r'\s*\d{4}[-/]\d{2}[-/]\d{2}.*$', '', title).strip()
     return title
 
-def send_email(title, link, source_name):
+def extract_publish_date(link):
+    candidates = [
+        link.get_text(" ", strip=True),
+        link.parent.get_text(" ", strip=True) if link.parent else "",
+        link.find_parent("li").get_text(" ", strip=True) if link.find_parent("li") else "",
+    ]
+    for text in candidates:
+        match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', text)
+        if match:
+            year, month, day = match.groups()
+            return f"{year}-{int(month):02d}-{int(day):02d}"
+    return "未识别"
+
+def send_email(title, link, source_name, publish_date="未识别"):
     if not MAIL_USER or not MAIL_PASS:
         print(f"⚠️ 邮箱配置不完整，跳过发送: {title}")
         return
     try:
         subject = f"【新通知】{source_name}: {title}"
-        content = f"来源: {source_name}\n时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n标题: {title}\n链接: {link}"
+        content = (
+            f"来源: {source_name}\n"
+            f"发布时间: {publish_date}\n"
+            f"检测时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            f"标题: {title}\n"
+            f"链接: {link}"
+        )
         
         message = MIMEText(content, 'plain', 'utf-8')
         message['From'] = MAIL_USER
@@ -135,7 +154,8 @@ def run_test_email():
     send_email(
         "School Monitor 测试邮件",
         "https://github.com/bo-qian/shu-monitor/actions",
-        "School Monitor"
+        "School Monitor",
+        datetime.datetime.now().strftime('%Y-%m-%d')
     )
 
 def run_task():
@@ -205,6 +225,7 @@ def run_task():
         for link in found_links:
             href = link.get('href')
             title = clean_title(link)
+            publish_date = extract_publish_date(link)
             
             if not href or len(title) < 4 or title in SKIP_TITLES: continue
             
@@ -214,7 +235,7 @@ def run_task():
             # === 核心逻辑修改 ===
             # 用 new_history 判断，避免同一次运行里重复链接发多封邮件。
             if full_url not in new_history:
-                send_email(title, full_url, school['name'])
+                send_email(title, full_url, school['name'], publish_date)
                 
                 new_history.add(full_url)
                 has_new = True
