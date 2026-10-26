@@ -63,6 +63,7 @@ https://gs.shu.edu.cn/info/1030/172992.htm
 https://gs.shu.edu.cn/info/1030/173012.htm
 https://gs.shu.edu.cn/info/1030/173272.htm
 https://gs.shu.edu.cn/info/1030/173292.htm
+https://gs.shu.edu.cn/info/1030/173332.htm
 https://gs.shu.edu.cn/info/1031/172482.htm
 https://gs.shu.edu.cn/info/1031/172512.htm
 https://gs.shu.edu.cn/info/1031/172522.htm
@@ -119,6 +120,8 @@ https://smes.shu.edu.cn/info/1014/10805.htm
 https://smes.shu.edu.cn/info/1014/10825.htm
 https://smes.shu.edu.cn/info/1014/10855.htm
 https://smes.shu.edu.cn/info/1014/10865.htm
+https://smes.shu.edu.cn/info/1014/10885.htm
+https://smes.shu.edu.cn/info/1014/10895.htm
 https://smes.shu.edu.cn/info/1015/10035.htm
 https://smes.shu.edu.cn/info/1015/10045.htm
 https://smes.shu.edu.cn/info/1015/10065.htm
